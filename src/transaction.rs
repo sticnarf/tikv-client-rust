@@ -1,6 +1,14 @@
+/*! Transactional related functionality.
+
+Using the [`transaction::Client`](struct.Client.html) you can utilize TiKV's transactional interface.
+
+This interface offers SQL-like transactions on top of the raw interface.
+
+**Warning:** It is not advisible to use the both raw and transactional functionality in the same keyspace.
+ */
 use crate::{Config, Error, Key, KvPair, Value};
 use futures::{Future, Poll, Stream};
-use std::ops::{RangeBounds, Deref};
+use std::ops::RangeBounds;
 
 /// A logical timestamp produced by PD.
 #[derive(Copy, Clone)]
