@@ -18,7 +18,7 @@ pub use crate::errors::Result;
 /// In TiKV, keys are an ordered sequence of bytes. This has an advantage over choosing `String` as valid `UTF-8` is not required. This means that the user is permitted to store any data they wish,
 /// as long as it can be represented by bytes. (Which is to say, pretty much anything!)
 ///
-/// This is a *wrapper type* that implements `Deref<Target=Vec<u8>>` so it can be used like one transparently.
+/// This is a *wrapper type* of `Vec<u8>` and implements `Deref<Target=[u8]>` so the content can be accessed transparently.
 ///
 /// This type also implements `From` for all types that implements `Into<Vec<u8>>`.
 /// You should be aware that the conversion from some types (such as `&str`) has an internal allocation cost.
@@ -64,7 +64,7 @@ impl AsRef<Key> for Key {
 }
 
 impl Deref for Key {
-    type Target = Vec<u8>;
+    type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -82,7 +82,7 @@ impl Key {
 /// In TiKV, values are an ordered sequence of bytes. This has an advantage over choosing `String` as valid `UTF-8` is not required. This means that the user is permitted to store any data they wish,
 /// as long as it can be represented by bytes. (Which is to say, pretty much anything!)
 ///
-/// This is a *wrapper type* that implements `Deref<Target=Vec<u8>>` so it can be used like one transparently.
+/// This is a *wrapper type* of `Vec<u8>` and implements `Deref<Target=[u8]>` so the content can be accessed transparently.
 ///
 /// This type also implements `From` for all types that implements `Into<Vec<u8>>`.
 /// You should be aware that the conversion from some types (such as `&str`) has an internal allocation cost.
@@ -122,7 +122,7 @@ impl<T: Into<Vec<u8>>> From<T> for Value {
 }
 
 impl Deref for Value {
-    type Target = Vec<u8>;
+    type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
         &self.0
