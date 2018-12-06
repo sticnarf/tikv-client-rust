@@ -10,22 +10,25 @@ oracle, while the transactional interface does.
 
 use crate::{transmute_bound, Config, Error, Key, KvPair, Value};
 use futures::{Future, Poll};
-use std::{u32, ops::{RangeBounds, Bound}};
+use std::{
+    ops::{Bound, RangeBounds},
+    u32,
+};
 
 /// A [`ColumnFamily`](struct.ColumnFamily.html) is an optional parameter for [`raw::Client`](struct.Client.html) requests.
-/// 
+///
 /// TiKV uses RocksDB's `ColumnFamily` support. You can learn more about RocksDB's `ColumnFamily`s [on their wiki](https://github.com/facebook/rocksdb/wiki/Column-Families).
-/// 
+///
 /// By default in TiKV data is stored in three different `ColumnFamily` values, configurable in the TiKV server's configuration:
-/// 
+///
 /// * Default: Where real user data is stored. Set by `[rocksdb.defaultcf]`.
 /// * Write: Where MVCC and index related data are stored. Set by `[rocksdb.writecf]`.
 /// * Lock: Where lock information is stored. Set by `[rocksdb.lockcf]`.
-/// 
+///
 /// Not providing a call a `ColumnFamily` means it will use the default value of `default`.
-/// 
+///
 /// The best (and only) way to create a [`ColumnFamily`](struct.ColumnFamily.html) is via the `From` implementation:
-/// 
+///
 /// ```rust
 /// # use tikv_client::raw::ColumnFamily;
 /// let cf = ColumnFamily::from("write");
@@ -403,7 +406,7 @@ impl<'a> Future for DeleteRange<'a> {
 }
 
 /// A future which resolves the initial connection between the [`Client`](struct.Client.html) and the TiKV cluster.
-/// 
+///
 /// ```rust,no_run
 /// # use tikv_client::{Config, raw::{Client, Connect}};
 /// # use futures::Future;
@@ -435,7 +438,7 @@ pub struct Client;
 
 impl Client {
     /// Create a new [`Client`](struct.Client.html) once the [`Connect`](struct.Connect.html) resolves.
-    /// 
+    ///
     /// ```rust,no_run
     /// use tikv_client::{Config, raw::{Client, Connect}};
     /// use futures::Future;
@@ -477,7 +480,7 @@ impl Client {
     /// let req = connected_client.batch_get(keys);
     /// let result: Vec<KvPair> = req.wait().unwrap();
     /// ```
-    pub fn batch_get(&self, keys: impl IntoIterator<Item=impl Into<Key>>) -> BatchGet {
+    pub fn batch_get(&self, keys: impl IntoIterator<Item = impl Into<Key>>) -> BatchGet {
         BatchGet::new(self, keys.into_iter().map(|v| v.into()).collect())
     }
 
@@ -498,7 +501,7 @@ impl Client {
     pub fn put(&self, key: impl Into<Key>, value: impl Into<Value>) -> Put {
         Put::new(self, key.into(), value.into())
     }
-    
+
     /// Create a new [`BatchPut`](struct.BatchPut.html) request.
     ///
     /// Once resolved this request will result in the setting of the value associated with the given key.
@@ -519,7 +522,7 @@ impl Client {
     }
 
     /// Create a new [`Delete`](struct.Delete.html) request.
-    /// 
+    ///
     /// Once resolved this request will result in the deletion of the given key.
     ///
     /// ```rust,no_run
@@ -571,9 +574,13 @@ impl Client {
     where
         K: Into<Key> + Clone,
     {
-        Scan::new(self,
-            (transmute_bound(range.start_bound()), transmute_bound(range.end_bound())),
-            limit.into().unwrap_or(u32::MAX)
+        Scan::new(
+            self,
+            (
+                transmute_bound(range.start_bound()),
+                transmute_bound(range.end_bound()),
+            ),
+            limit.into().unwrap_or(u32::MAX),
         )
     }
 
@@ -604,9 +611,15 @@ impl Client {
     {
         BatchScan::new(
             self,
-            ranges.into_iter().map(|v| 
-                (transmute_bound(v.start_bound()), transmute_bound(v.end_bound()))
-            ).collect(),
+            ranges
+                .into_iter()
+                .map(|v| {
+                    (
+                        transmute_bound(v.start_bound()),
+                        transmute_bound(v.end_bound()),
+                    )
+                })
+                .collect(),
             each_limit.into().unwrap_or(u32::MAX),
         )
     }

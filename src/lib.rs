@@ -1,5 +1,8 @@
 use serde_derive::*;
-use std::{ops::{Deref, Bound}, path::PathBuf};
+use std::{
+    ops::{Bound, Deref},
+    path::PathBuf,
+};
 
 mod errors;
 pub mod raw;
@@ -11,60 +14,46 @@ pub use crate::errors::Error;
 pub use crate::errors::Result;
 
 /// The key part of a key/value pair.
-/// 
+///
 /// In TiKV, keys are an ordered sequence of bytes. This has an advantage over choosing `String` as valid `UTF-8` is not required. This means that the user is permitted to store any data they wish,
 /// as long as it can be represented by bytes. (Which is to say, pretty much anything!)
-/// 
+///
 /// This is a *wrapper type* that implements `Deref<Target=Vec<u8>>` so it can be used like one transparently.
-/// 
-/// This type also implements `From` for many types. With one exception, these are all done without reallocation. Using a `&'static str`, like many examples do for simplicity, has an internal
-/// allocation cost. 
-/// 
+///
+/// This type also implements `From` for all types that implements `Into<Vec<u8>>`.
+/// You should be aware that the conversion from some types (such as `&str`) has an internal allocation cost.
+///
 /// This type wraps around an owned value, so it should be treated it like `String` or `Vec<u8>`
 /// over a `&str` or `&[u8]`.
-/// 
+///
 /// ```rust
 /// use tikv_client::Key;
-/// 
+///
 /// let static_str: &'static str = "TiKV";
 /// let from_static_str = Key::from(static_str);
-/// 
+///
 /// let string: String = String::from(static_str);
 /// let from_string = Key::from(string);
 /// assert_eq!(from_static_str, from_string);
-/// 
+///
 /// let vec: Vec<u8> = static_str.as_bytes().to_vec();
 /// let from_vec = Key::from(vec);
 /// assert_eq!(from_static_str, from_vec);
-/// 
+///
 /// let bytes = static_str.as_bytes().to_vec();
 /// let from_bytes = Key::from(bytes);
 /// assert_eq!(from_static_str, from_bytes);
 /// ```
-/// 
-/// **But, you should not need to worry about all this:** Many functions which accept a `Key` 
+///
+/// **But, you should not need to worry about all this:** Many functions which accept a `Key`
 /// accept an `Into<Key>`, which means all of the above types can be passed directly to those
 /// functions.
 #[derive(Default, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct Key(Vec<u8>);
 
-impl From<Vec<u8>> for Key {
-    fn from(v: Vec<u8>) -> Self {
-        Key(v)
-    }
-}
-
-impl From<String> for Key {
-    fn from(v: String) -> Key {
-        Key(v.into_bytes())
-    }
-}
-
-impl<'a> From<&'static str> for Key {
-    fn from(v: &'static str) -> Key {
-        let mut vec = Vec::new();
-        vec.extend_from_slice(v.as_bytes());
-        Key(vec)
+impl<T: Into<Vec<u8>>> From<T> for Key {
+    fn from(t: T) -> Self {
+        Key(t.into())
     }
 }
 
@@ -95,8 +84,8 @@ impl Key {
 ///
 /// This is a *wrapper type* that implements `Deref<Target=Vec<u8>>` so it can be used like one transparently.
 ///
-/// This type also implements `From` for many types. With one exception, these are all done without reallocation. Using a `&'static str`, like many examples do for simplicity, has an internal
-/// allocation cost.
+/// This type also implements `From` for all types that implements `Into<Vec<u8>>`.
+/// You should be aware that the conversion from some types (such as `&str`) has an internal allocation cost.
 ///
 /// This type wraps around an owned value, so it should be treated it like `String` or `Vec<u8>`
 /// over a `&str` or `&[u8]`.
@@ -126,23 +115,9 @@ impl Key {
 #[derive(Default, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Value(Vec<u8>);
 
-impl From<Vec<u8>> for Value {
-    fn from(v: Vec<u8>) -> Self {
-        Value(v)
-    }
-}
-
-impl From<String> for Value {
-    fn from(v: String) -> Value {
-        Value(v.into_bytes())
-    }
-}
-
-impl From<&'static str> for Value {
-    fn from(v: &'static str) -> Value {
-        let mut vec = Vec::new();
-        vec.extend_from_slice(v.as_bytes());
-        Value(vec)
+impl<T: Into<Vec<u8>>> From<T> for Value {
+    fn from(t: T) -> Self {
+        Value(t.into())
     }
 }
 
@@ -155,7 +130,7 @@ impl Deref for Value {
 }
 
 /// A key/value pair.
-/// 
+///
 /// ```rust
 /// # use tikv_client::{Key, Value, KvPair};
 /// let key = "key";
@@ -164,7 +139,7 @@ impl Deref for Value {
 /// let from_tuple = KvPair::from((key, value));
 /// assert_eq!(constructed, from_tuple);
 /// ```
-/// 
+///
 /// **But, you should not need to worry about all this:** Many functions which accept a `KvPair`
 /// accept an `Into<KvPair>`, which means all of the above types can be passed directly to those
 /// functions.
@@ -209,14 +184,17 @@ impl KvPair {
 }
 
 impl<K, V> From<(K, V)> for KvPair
-where K: Into<Key>, V: Into<Value> {
+where
+    K: Into<Key>,
+    V: Into<Value>,
+{
     fn from((k, v): (K, V)) -> Self {
         KvPair(k.into(), v.into())
     }
 }
 
 /// The configuration of either a [`raw::Client`](raw/struct.Client.html) or a [`transaction::Client`](transaction/struct.Client.html).
-/// 
+///
 /// Because TiKV is managed by a [PD](https://github.com/pingcap/pd/) cluster the endpoints for PD must be provided, **not** the TiKV nodes.
 ///
 /// It's important to **include more than one PD endpoint** (include all, if possible!) This helps avoid having a *single point of failure*.
@@ -232,7 +210,7 @@ pub struct Config {
 
 impl Config {
     /// Create a new [`Config`](struct.Config.html) which coordinates with the given PD endpoints.
-    /// 
+    ///
     /// ```rust
     /// # use tikv_client::Config;
     /// let config = Config::new(vec!["192.168.0.100:2379", "192.168.0.101:2379"]);
@@ -247,9 +225,9 @@ impl Config {
     }
 
     /// Set the certificate authority, certificate, and key locations for the [`Config`](struct.Config.html).
-    /// 
+    ///
     /// By default, TiKV connections do not have utilize transport layer security. Enable it by setting these values.
-    /// 
+    ///
     /// ```rust
     /// # use tikv_client::Config;
     /// let config = Config::new(vec!["192.168.0.100:2379", "192.168.0.101:2379"])
