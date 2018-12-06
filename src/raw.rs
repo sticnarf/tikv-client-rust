@@ -105,7 +105,7 @@ impl<'a> BatchGet<'a> {
 
 impl<'a> Future for BatchGet<'a> {
     type Item = Vec<KvPair>;
-    type Error = ();
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let _ = &self.client;
@@ -141,7 +141,7 @@ impl<'a> Put<'a> {
 
 impl<'a> Future for Put<'a> {
     type Item = ();
-    type Error = ();
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let _ = &self.client;
@@ -176,7 +176,7 @@ impl<'a> BatchPut<'a> {
 
 impl<'a> Future for BatchPut<'a> {
     type Item = ();
-    type Error = ();
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let _ = &self.client;
@@ -223,7 +223,7 @@ impl<'a> Delete<'a> {
 
 impl<'a> Future for Delete<'a> {
     type Item = ();
-    type Error = ();
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let _ = &self.client;
@@ -257,7 +257,7 @@ impl<'a> BatchDelete<'a> {
 
 impl<'a> Future for BatchDelete<'a> {
     type Item = ();
-    type Error = ();
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let _ = &self.client;
@@ -307,7 +307,7 @@ impl<'a> Scan<'a> {
 
 impl<'a> Future for Scan<'a> {
     type Item = Vec<KvPair>;
-    type Error = ();
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let _ = &self.client;
@@ -359,7 +359,7 @@ impl<'a> BatchScan<'a> {
 
 impl<'a> Future for BatchScan<'a> {
     type Item = Vec<KvPair>;
-    type Error = ();
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let _ = &self.client;
@@ -395,7 +395,7 @@ impl<'a> DeleteRange<'a> {
 
 impl<'a> Future for DeleteRange<'a> {
     type Item = ();
-    type Error = ();
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let _ = &self.client;
