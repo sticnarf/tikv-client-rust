@@ -8,12 +8,9 @@ oracle, while the transactional interface does.
 **Warning:** It is not advisible to use the both raw and transactional functionality in the same keyspace.
  */
 
-use crate::{transmute_bound, Config, Error, Key, KvPair, Value};
+use crate::{Config, Error, Key, KeyRange, KvPair, Value};
 use futures::{Future, Poll};
-use std::{
-    ops::{Bound, RangeBounds},
-    u32,
-};
+use std::{ops::Bound, u32};
 
 /// A [`ColumnFamily`](struct.ColumnFamily.html) is an optional parameter for [`raw::Client`](struct.Client.html) requests.
 ///
@@ -570,18 +567,8 @@ impl Client {
     /// let req = connected_client.scan(inclusive_range, 2);
     /// let result: Vec<KvPair> = req.wait().unwrap();
     /// ```
-    pub fn scan<K>(&self, range: impl RangeBounds<K>, limit: impl Into<Option<u32>>) -> Scan
-    where
-        K: Into<Key> + Clone,
-    {
-        Scan::new(
-            self,
-            (
-                transmute_bound(range.start_bound()),
-                transmute_bound(range.end_bound()),
-            ),
-            limit.into().unwrap_or(u32::MAX),
-        )
+    pub fn scan(&self, range: impl KeyRange, limit: impl Into<Option<u32>>) -> Scan {
+        Scan::new(self, range.into_bounds(), limit.into().unwrap_or(u32::MAX))
     }
 
     /// Create a new [`BatchScan`](struct.BatchScan.html) request.
@@ -601,25 +588,14 @@ impl Client {
     /// let req = connected_client.batch_scan(iterable, 2);
     /// let result = req.wait();
     /// ```
-    pub fn batch_scan<K>(
+    pub fn batch_scan(
         &self,
-        ranges: impl IntoIterator<Item = impl RangeBounds<K>>,
+        ranges: impl IntoIterator<Item = impl KeyRange>,
         each_limit: impl Into<Option<u32>>,
-    ) -> BatchScan
-    where
-        K: Into<Key> + Clone,
-    {
+    ) -> BatchScan {
         BatchScan::new(
             self,
-            ranges
-                .into_iter()
-                .map(|v| {
-                    (
-                        transmute_bound(v.start_bound()),
-                        transmute_bound(v.end_bound()),
-                    )
-                })
-                .collect(),
+            ranges.into_iter().map(KeyRange::into_bounds).collect(),
             each_limit.into().unwrap_or(u32::MAX),
         )
     }
@@ -639,16 +615,7 @@ impl Client {
     /// let req = connected_client.delete_range(inclusive_range);
     /// let result: () = req.wait().unwrap();
     /// ```
-    pub fn delete_range<K>(&self, range: impl RangeBounds<K>) -> DeleteRange
-    where
-        K: Into<Key> + Clone,
-    {
-        DeleteRange::new(
-            self,
-            (
-                transmute_bound(range.start_bound()),
-                transmute_bound(range.end_bound()),
-            ),
-        )
+    pub fn delete_range(&self, range: impl KeyRange) -> DeleteRange {
+        DeleteRange::new(self, range.into_bounds())
     }
 }

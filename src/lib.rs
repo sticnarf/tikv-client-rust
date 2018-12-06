@@ -1,6 +1,6 @@
 use serde_derive::*;
 use std::{
-    ops::{Bound, Deref},
+    ops::{Bound, Deref, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
     path::PathBuf,
 };
 
@@ -220,6 +220,56 @@ where
     }
 }
 
+pub trait KeyRange {
+    fn into_bounds(self) -> (Bound<Key>, Bound<Key>);
+}
+
+impl<T: Into<Key>> KeyRange for Range<T> {
+    fn into_bounds(self) -> (Bound<Key>, Bound<Key>) {
+        (
+            Bound::Included(self.start.into()),
+            Bound::Excluded(self.end.into()),
+        )
+    }
+}
+
+impl<T: Into<Key>> KeyRange for RangeFrom<T> {
+    fn into_bounds(self) -> (Bound<Key>, Bound<Key>) {
+        (Bound::Included(self.start.into()), Bound::Unbounded)
+    }
+}
+
+impl KeyRange for RangeFull {
+    fn into_bounds(self) -> (Bound<Key>, Bound<Key>) {
+        (Bound::Unbounded, Bound::Unbounded)
+    }
+}
+
+impl<T: Into<Key>> KeyRange for RangeInclusive<T> {
+    fn into_bounds(self) -> (Bound<Key>, Bound<Key>) {
+        let (start, end) = self.into_inner();
+        (Bound::Included(start.into()), Bound::Included(end.into()))
+    }
+}
+
+impl<T: Into<Key>> KeyRange for RangeTo<T> {
+    fn into_bounds(self) -> (Bound<Key>, Bound<Key>) {
+        (Bound::Unbounded, Bound::Excluded(self.end.into()))
+    }
+}
+
+impl<T: Into<Key>> KeyRange for RangeToInclusive<T> {
+    fn into_bounds(self) -> (Bound<Key>, Bound<Key>) {
+        (Bound::Unbounded, Bound::Included(self.end.into()))
+    }
+}
+
+impl<T: Into<Key>> KeyRange for (Bound<T>, Bound<T>) {
+    fn into_bounds(self) -> (Bound<Key>, Bound<Key>) {
+        (transmute_bound(self.0), transmute_bound(self.1))
+    }
+}
+
 /// The configuration of either a [`raw::Client`](raw/struct.Client.html) or a [`transaction::Client`](transaction/struct.Client.html).
 ///
 /// Because TiKV is managed by a [PD](https://github.com/pingcap/pd/) cluster the endpoints for PD must be provided, **not** the TiKV nodes.
@@ -273,14 +323,14 @@ impl Config {
     }
 }
 
-fn transmute_bound<K>(b: Bound<&K>) -> Bound<Key>
+fn transmute_bound<K>(b: Bound<K>) -> Bound<Key>
 where
-    K: Into<Key> + Clone,
+    K: Into<Key>,
 {
     use std::ops::Bound::*;
     match b {
-        Included(k) => Included(k.clone().into()),
-        Excluded(k) => Excluded(k.clone().into()),
+        Included(k) => Included(k.into()),
+        Excluded(k) => Excluded(k.into()),
         Unbounded => Unbounded,
     }
 }
