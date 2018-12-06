@@ -211,9 +211,9 @@ impl KvPair {
 }
 
 impl<K, V> From<(K, V)> for KvPair
-    where
-        K: Into<Key>,
-        V: Into<Value>,
+where
+    K: Into<Key>,
+    V: Into<Value>,
 {
     fn from((k, v): (K, V)) -> Self {
         KvPair(k.into(), v.into())
@@ -242,7 +242,7 @@ impl Config {
     /// # use tikv_client::Config;
     /// let config = Config::new(vec!["192.168.0.100:2379", "192.168.0.101:2379"]);
     /// ```
-    pub fn new(pd_endpoints: impl IntoIterator<Item=impl Into<String>>) -> Self {
+    pub fn new(pd_endpoints: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Config {
             pd_endpoints: pd_endpoints.into_iter().map(Into::into).collect(),
             ca_path: None,
@@ -274,8 +274,8 @@ impl Config {
 }
 
 fn transmute_bound<K>(b: Bound<&K>) -> Bound<Key>
-    where
-        K: Into<Key> + Clone,
+where
+    K: Into<Key> + Clone,
 {
     use std::ops::Bound::*;
     match b {

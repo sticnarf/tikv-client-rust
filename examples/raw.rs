@@ -22,42 +22,42 @@ fn main() {
     println!("Successfully put {:?}:{:?} to tikv", key, value);
 
     let value = raw
-        .get(&key)
+        .get(key.clone())
         .cf("test_cf")
         .wait()
         .expect("Could not get value");
     println!("Found val: {:?} for key: {:?}", value, key);
 
-    raw.delete(&key)
+    raw.delete(key.clone())
         .cf("test_cf")
         .wait()
         .expect("Could not delete value");
     println!("Key: {:?} deleted", key);
 
-    raw.get(&key)
+    raw.get(key.clone())
         .cf("test_cf")
         .wait()
         .expect_err("Get returned value for not existing key");
 
-    let keys = vec![b"k1".to_vec().into(), b"k2".to_vec().into()];
+    let keys = vec!["k1", "k2"];
 
-    let values = raw
-        .batch_get(&keys)
+    let pairs = raw
+        .batch_get(keys)
         .cf("test_cf")
         .wait()
         .expect("Could not get values");
-    println!("Found values: {:?} for keys: {:?}", values, keys);
+    println!("Found kv pairs: {:?}", pairs);
 
-    let start: Key = b"k1".to_vec().into();
-    let end: Key = b"k2".to_vec().into();
-    raw.scan(&start..&end, 10)
+    let start = "k1";
+    let end = "k2";
+    raw.scan(start..end, 10)
         .cf("test_cf")
         .key_only()
         .wait()
         .expect("Could not scan");
 
-    let ranges = [&start..&end, &start..&end];
-    raw.batch_scan(&ranges, 10)
+    let ranges = vec![start..end, start..end];
+    raw.batch_scan(ranges, 10)
         .cf("test_cf")
         .key_only()
         .wait()
