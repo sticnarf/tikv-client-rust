@@ -43,6 +43,9 @@ pub use crate::errors::Result;
 /// let bytes = static_str.as_bytes().to_vec();
 /// let from_bytes = Key::from(bytes);
 /// assert_eq!(from_static_str, from_bytes);
+///
+/// let inner: Vec<u8> = from_bytes.into_inner();
+/// assert_eq!(inner, static_str.as_bytes().to_vec());
 /// ```
 ///
 /// **But, you should not need to worry about all this:** Many functions which accept a `Key`
@@ -74,6 +77,11 @@ impl Deref for Key {
 impl Key {
     pub fn new(value: Vec<u8>) -> Self {
         Key(value)
+    }
+
+    /// Unwraps the value.
+    pub fn into_inner(self) -> Vec<u8> {
+        self.0
     }
 }
 
@@ -107,6 +115,9 @@ impl Key {
 /// let bytes = static_str.as_bytes().to_vec();
 /// let from_bytes = Value::from(bytes);
 /// assert_eq!(from_static_str, from_bytes);
+///
+/// let inner: Vec<u8> = from_bytes.into_inner();
+/// assert_eq!(inner, static_str.as_bytes().to_vec());
 /// ```
 ///
 /// **But, you should not need to worry about all this:** Many functions which accept a `Value`
@@ -129,6 +140,13 @@ impl Deref for Value {
     }
 }
 
+impl Value {
+    /// Unwraps the value.
+    pub fn into_inner(self) -> Vec<u8> {
+        self.0
+    }
+}
+
 /// A key/value pair.
 ///
 /// ```rust
@@ -138,6 +156,10 @@ impl Deref for Value {
 /// let constructed = KvPair::new(key, value);
 /// let from_tuple = KvPair::from((key, value));
 /// assert_eq!(constructed, from_tuple);
+///
+/// let (inner_key, inner_value) = constructed.into_inner();
+/// assert_eq!(inner_key, Key::from(key));
+/// assert_eq!(inner_value, Value::from(value));
 /// ```
 ///
 /// **But, you should not need to worry about all this:** Many functions which accept a `KvPair`
@@ -181,12 +203,17 @@ impl KvPair {
     pub fn set_value(&mut self, v: impl Into<Value>) {
         self.1 = v.into();
     }
+
+    /// Unwraps the value.
+    pub fn into_inner(self) -> (Key, Value) {
+        (self.0, self.1)
+    }
 }
 
 impl<K, V> From<(K, V)> for KvPair
-where
-    K: Into<Key>,
-    V: Into<Value>,
+    where
+        K: Into<Key>,
+        V: Into<Value>,
 {
     fn from((k, v): (K, V)) -> Self {
         KvPair(k.into(), v.into())
@@ -215,7 +242,7 @@ impl Config {
     /// # use tikv_client::Config;
     /// let config = Config::new(vec!["192.168.0.100:2379", "192.168.0.101:2379"]);
     /// ```
-    pub fn new(pd_endpoints: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn new(pd_endpoints: impl IntoIterator<Item=impl Into<String>>) -> Self {
         Config {
             pd_endpoints: pd_endpoints.into_iter().map(Into::into).collect(),
             ca_path: None,
@@ -247,8 +274,8 @@ impl Config {
 }
 
 fn transmute_bound<K>(b: Bound<&K>) -> Bound<Key>
-where
-    K: Into<Key> + Clone,
+    where
+        K: Into<Key> + Clone,
 {
     use std::ops::Bound::*;
     match b {
