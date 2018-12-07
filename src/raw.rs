@@ -25,7 +25,7 @@ use std::{
 /// * Write: Where MVCC and index related data are stored. Set by `[rocksdb.writecf]`.
 /// * Lock: Where lock information is stored. Set by `[rocksdb.lockcf]`.
 ///
-/// Not providing a call a `ColumnFamily` means it will use the default value of `default`.
+/// Not providing a `ColumnFamily` means it will use the default value of `default`.
 ///
 /// The best (and only) way to create a [`ColumnFamily`](struct.ColumnFamily.html) is via the `From` implementation:
 ///
