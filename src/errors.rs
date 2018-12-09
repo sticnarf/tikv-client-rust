@@ -89,6 +89,11 @@ quick_error! {
             description("raft entry too large")
             display("{:?} bytes raft entry of region {:?} is too large", entry_size, region_id)
         }
+        /// Cannot access to any PD endpoint
+        PdUnavailable {
+            description("cannot access to any PD endpoint")
+            display("cannot access to any PD endpoint")
+        }
     }
 }
 

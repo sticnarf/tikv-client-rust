@@ -8,8 +8,10 @@ oracle, while the transactional interface does.
 **Warning:** It is not advisible to use the both raw and transactional functionality in the same keyspace.
  */
 
+use crate::pd::*;
 use crate::{Config, Error, Key, KeyRange, KvPair, Value};
-use futures::{Future, Poll};
+use futures::{prelude::*, try_ready};
+use std::sync::Arc;
 use std::{ops::Bound, u32};
 
 /// A [`ColumnFamily`](struct.ColumnFamily.html) is an optional parameter for [`raw::Client`](struct.Client.html) requests.
@@ -411,12 +413,13 @@ impl<'a> Future for DeleteRange<'a> {
 /// let client = connect.wait();
 /// ```
 pub struct Connect {
-    config: Config,
+    pd_conn: PdConnect,
 }
 
 impl Connect {
     fn new(config: Config) -> Self {
-        Connect { config }
+        let pd_conn = PdClient::connect(config.pd_endpoints, config.security.map(Arc::new));
+        Connect { pd_conn }
     }
 }
 
@@ -425,13 +428,17 @@ impl Future for Connect {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let _config = &self.config;
-        unimplemented!()
+        Ok(Async::Ready(Client {
+            pd_client: try_ready!(self.pd_conn.poll()),
+        }))
     }
 }
 
 /// The TiKV raw [`Client`](struct.Client.html) is used to issue requests to the TiKV server and PD cluster.
-pub struct Client;
+#[derive(Debug)]
+pub struct Client {
+    pd_client: PdClient,
+}
 
 impl Client {
     /// Create a new [`Client`](struct.Client.html) once the [`Connect`](struct.Connect.html) resolves.

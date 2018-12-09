@@ -1,12 +1,18 @@
+#![recursion_limit = "128"]
+
+use crate::util::SecurityConfig;
 use serde_derive::*;
 use std::{
     ops::{Bound, Deref, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
     path::PathBuf,
 };
 
+#[macro_use]
 mod errors;
+mod pd;
 pub mod raw;
 pub mod transaction;
+mod util;
 
 #[doc(inline)]
 pub use crate::errors::Error;
@@ -279,10 +285,8 @@ impl<T: Into<Key>> KeyRange for (Bound<T>, Bound<T>) {
 #[serde(default)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
-    pub pd_endpoints: Vec<String>,
-    pub ca_path: Option<PathBuf>,
-    pub cert_path: Option<PathBuf>,
-    pub key_path: Option<PathBuf>,
+    pd_endpoints: Vec<String>,
+    security: Option<SecurityConfig>,
 }
 
 impl Config {
@@ -295,9 +299,7 @@ impl Config {
     pub fn new(pd_endpoints: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Config {
             pd_endpoints: pd_endpoints.into_iter().map(Into::into).collect(),
-            ca_path: None,
-            cert_path: None,
-            key_path: None,
+            security: None,
         }
     }
 
@@ -316,9 +318,11 @@ impl Config {
         cert_path: impl Into<PathBuf>,
         key_path: impl Into<PathBuf>,
     ) -> Self {
-        self.ca_path = Some(ca_path.into());
-        self.cert_path = Some(cert_path.into());
-        self.key_path = Some(key_path.into());
+        self.security = Some(SecurityConfig {
+            ca_path: ca_path.into(),
+            cert_path: cert_path.into(),
+            key_path: key_path.into(),
+        });
         self
     }
 }
