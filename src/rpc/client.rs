@@ -24,6 +24,7 @@ use crate::{
         pd::{PdClient, Region, RegionId, Store, StoreId},
         security::SecurityManager,
         tikv::KvClient,
+        util,
     },
     Config, Error, Key, KvPair, Result, Value,
 };
@@ -44,7 +45,7 @@ impl RpcClient {
         let env = Arc::new(
             EnvBuilder::new()
                 .cq_count(CQ_COUNT)
-                .name_prefix(thread_name!(CLIENT_PREFIX))
+                .name_prefix(util::new_thread_name(CLIENT_PREFIX))
                 .build(),
         );
         let security_mgr = Arc::new(

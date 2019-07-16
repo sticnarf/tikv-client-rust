@@ -16,19 +16,13 @@ macro_rules! internal_err {
 }
 
 /// make a thread name with additional tag inheriting from current thread.
-macro_rules! thread_name {
-    ($name:expr) => {{
-        $crate::rpc::util::get_tag_from_thread_name()
-            .map(|tag| format!("{}::{}", $name, tag))
-            .unwrap_or_else(|| $name.to_owned())
-    }};
-}
-
-pub fn get_tag_from_thread_name() -> Option<String> {
-    thread::current()
+pub fn new_thread_name(name: &str) -> String {
+    let tag = thread::current()
         .name()
         .and_then(|name| name.split("::").skip(1).last())
-        .map(From::from)
+        .map(From::from);
+    tag.map(|tag| format!("{}::{}", name, tag))
+        .unwrap_or_else(|| name.to_owned())
 }
 
 /// Convert Duration to seconds.
@@ -46,7 +40,7 @@ lazy_static! {
 fn start_global_timer() -> Handle {
     let (tx, rx) = mpsc::channel();
     thread::Builder::new()
-        .name(thread_name!("timer"))
+        .name(new_thread_name("timer"))
         .spawn(move || {
             let mut timer = tokio_timer::Timer::default();
             tx.send(timer.handle()).unwrap();
