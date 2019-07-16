@@ -68,7 +68,7 @@
 //! let connect = Client::connect(config);
 //!
 //! // Resolve the connection into a client.
-//! let client = connect.into_future().await;
+//! let client = connect.await;
 //! # });
 //! ```
 //!
