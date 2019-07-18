@@ -21,7 +21,7 @@ pub fn new_thread_name(name: &str) -> String {
         .name()
         .and_then(|name| name.split("::").skip(1).last())
         .map(From::from);
-    tag.map(|tag| format!("{}::{}", name, tag))
+    tag.map(|tag: String| format!("{}::{}", name, tag))
         .unwrap_or_else(|| name.to_owned())
 }
 

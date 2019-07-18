@@ -6,8 +6,7 @@ use std::{
     time::Duration,
 };
 
-use futures::compat::Compat01As03;
-use futures::prelude::*;
+use futures::{compat::*, prelude::*};
 use grpcio::{CallOption, Environment};
 use kvproto::{pdpb, pdpb::PdClient as RpcClient};
 
@@ -22,6 +21,7 @@ use crate::{
     },
     Error, ErrorKind, Result,
 };
+use kvproto::pdpb::GetMembersResponse;
 
 const LEADER_CHANGE_RETRY: usize = 10;
 
@@ -47,29 +47,25 @@ impl PdResponse for pdpb::GetAllStoresResponse {
     }
 }
 
-pub struct PdClient {
-    cluster_id: u64,
-    leader: Arc<RwLock<LeaderClient>>,
-    timeout: Duration,
-}
+pub struct PdClient(RpcClient);
 
 impl PdClient {
-    pub fn connect(
+    pub async fn connect(
         env: Arc<Environment>,
-        endpoints: &[String],
-        security_mgr: Arc<SecurityManager>,
+        addr: &str,
+        security_mgr: &SecurityManager,
         timeout: Duration,
-    ) -> Result<PdClient> {
-        let leader = LeaderClient::connect(env, endpoints, security_mgr, timeout)?;
-        let cluster_id = leader.read().unwrap().cluster_id();
-
-        Ok(PdClient {
-            cluster_id,
-            leader,
-            timeout,
-        })
+    ) -> Result<(RpcClient, pdpb::GetMembersResponse)> {
+        let client = security_mgr.connect(env, addr, RpcClient::new)?;
+        let option = || CallOption::default().timeout(timeout);
+        let resp = client
+            .get_members_async_opt(&pdpb::GetMembersRequest::default(), option())?
+            .compat()
+            .await?;
+        Ok((client, resp))
     }
 
+    /*
     fn get_leader(&self) -> pdpb::Member {
         self.leader.read().unwrap().members.get_leader().clone()
     }
@@ -192,14 +188,15 @@ impl PdClient {
     pub fn get_ts(&self) -> impl Future<Output = Result<Timestamp>> {
         self.leader.write().unwrap().get_ts()
     }
+    */
 }
 
 impl fmt::Debug for PdClient {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("PdClient")
-            .field("cluster_id", &self.cluster_id)
-            .field("leader", &self.get_leader())
-            .field("timeout", &self.timeout)
+            //            .field("cluster_id", &self.cluster_id)
+            //            .field("leader", &self.get_leader())
+            //            .field("timeout", &self.timeout)
             .finish()
     }
 }

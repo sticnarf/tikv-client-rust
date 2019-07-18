@@ -11,12 +11,11 @@ use futures::channel::{
     mpsc::{channel, unbounded, Receiver, Sender, UnboundedReceiver, UnboundedSender},
     oneshot,
 };
-use futures::compat::{Compat01As03, Compat01As03Sink};
+use futures::compat::{Compat01As03, Compat01As03Sink, Sink01CompatExt, Stream01CompatExt};
 use futures::future::TryFutureExt;
 use futures::prelude::*;
 use grpcio::{CallOption, Environment, WriteFlags};
 use kvproto::pdpb;
-use tokio_core::reactor::{Core, Handle as TokioHandle};
 
 use crate::{
     compat::SinkCompat,
@@ -29,6 +28,8 @@ use crate::{
     },
     Error, Result,
 };
+use futures::sink::Sink;
+use kvproto::pdpb::TsoRequest;
 
 macro_rules! pd_request {
     ($cluster_id:expr, $type:ty) => {{
@@ -39,187 +40,187 @@ macro_rules! pd_request {
         request
     }};
 }
-
-type TsoChannel = oneshot::Sender<Timestamp>;
-
-enum PdTask {
-    Init,
-    Request,
-    Response(Vec<oneshot::Sender<Timestamp>>, pdpb::TsoResponse),
-}
-
-struct PdReactor {
-    task_tx: Option<UnboundedSender<Option<PdTask>>>,
-    tso_tx: Sender<pdpb::TsoRequest>,
-    tso_rx: Option<Receiver<pdpb::TsoRequest>>,
-
-    handle: Option<JoinHandle<()>>,
-    tso_pending: Option<Vec<TsoChannel>>,
-    tso_buffer: Option<Vec<TsoChannel>>,
-    tso_batch: Vec<TsoChannel>,
-}
-
-impl Drop for PdReactor {
-    fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            handle.join().unwrap();
-        }
-    }
-}
-
-impl PdReactor {
-    fn new() -> Self {
-        let (tso_tx, tso_rx) = channel(1);
-        PdReactor {
-            task_tx: None,
-            tso_tx,
-            tso_rx: Some(tso_rx),
-            handle: None,
-            tso_buffer: Some(Vec::with_capacity(8)),
-            tso_batch: Vec::with_capacity(8),
-            tso_pending: None,
-        }
-    }
-
-    fn start(&mut self, client: Arc<RwLock<LeaderClient>>) {
-        if self.handle.is_none() {
-            info!("starting pd reactor thread");
-            let (task_tx, task_rx) = unbounded();
-            task_tx.unbounded_send(Some(PdTask::Init)).unwrap();
-            self.task_tx = Some(task_tx);
-            self.handle = Some(
-                thread::Builder::new()
-                    .name("dispatcher thread".to_owned())
-                    .spawn(move || Self::poll(&client, task_rx))
-                    .unwrap(),
-            )
-        } else {
-            warn!("tso sender and receiver are stale, refreshing...");
-            let (tso_tx, tso_rx) = channel(1);
-            self.tso_tx = tso_tx;
-            self.tso_rx = Some(tso_rx);
-            self.schedule(PdTask::Init);
-        }
-    }
-
-    fn schedule(&self, task: PdTask) {
-        self.task_tx
-            .as_ref()
-            .unwrap()
-            .unbounded_send(Some(task))
-            .expect("unbounded send should never fail");
-    }
-
-    fn poll(client: &Arc<RwLock<LeaderClient>>, rx: UnboundedReceiver<Option<PdTask>>) {
-        let mut core = Core::new().unwrap();
-        let handle = core.handle();
-        {
-            let f = rx.take_while(|t| future::ready(t.is_some())).for_each(|t| {
-                Self::dispatch(&client, t.unwrap(), &handle);
-                future::ready(())
-            });
-            core.run(TryFutureExt::compat(f.unit_error())).unwrap();
-        }
-    }
-
-    fn init(client: &Arc<RwLock<LeaderClient>>, handle: &TokioHandle) {
-        let client = Arc::clone(client);
-        let (tx, rx) = client.write().unwrap().client.tso().unwrap();
-        let tx = Compat01As03Sink::new(tx);
-        let rx = Compat01As03::new(rx);
-        let tso_rx = client.write().unwrap().reactor.tso_rx.take().unwrap(); // Receiver<TsoRequest>: Stream
-
-        handle.spawn(
-            tx.sink_map_err(Into::into)
-                .send_all_compat(tso_rx.map(|r| (r, WriteFlags::default())))
-                .map(|r: Result<_>| match r {
-                    Ok((_sender, _)) => {
-                        // FIXME(#54) the previous code doesn't work because we can't get mutable
-                        // access to the underlying StreamingCallSink to call `cancel`. But I think
-                        // that is OK because it will be canceled when it is dropped.
-                        //
-                        // _sender.get_mut().get_ref().cancel();
-                        Ok(())
-                    }
-                    Err(e) => {
-                        error!("failed to send tso requests: {:?}", e);
-                        Err(())
-                    }
-                })
-                .compat(),
-        );
-
-        handle.spawn(
-            rx.try_for_each(move |resp| {
-                let mut client = client.write().unwrap();
-                let reactor = &mut client.reactor;
-                let tso_pending = reactor.tso_pending.take().unwrap();
-                reactor.schedule(PdTask::Response(tso_pending, resp));
-                if !reactor.tso_batch.is_empty() {
-                    // Schedule another tso_batch of request
-                    reactor.schedule(PdTask::Request);
-                }
-                future::ready(Ok(()))
-            })
-            .map_err(|e| panic!("unexpected error: {:?}", e))
-            .compat(),
-        );
-    }
-
-    fn tso_request(client: &Arc<RwLock<LeaderClient>>) {
-        let mut client = client.write().unwrap();
-        let cluster_id = client.cluster_id;
-        let reactor = &mut client.reactor;
-        let mut tso_batch = reactor.tso_buffer.take().unwrap();
-        tso_batch.extend(reactor.tso_batch.drain(..));
-        let mut request = pd_request!(cluster_id, pdpb::TsoRequest);
-        let batch_size = observe_tso_batch(tso_batch.len());
-        request.set_count(batch_size);
-        reactor.tso_pending = Some(tso_batch);
-        reactor
-            .tso_tx
-            .try_send(request)
-            .expect("channel can never be full");
-    }
-
-    fn tso_response(
-        client: &Arc<RwLock<LeaderClient>>,
-        mut requests: Vec<TsoChannel>,
-        response: &pdpb::TsoResponse,
-    ) {
-        let timestamp = response.get_timestamp();
-        for (offset, request) in requests.drain(..).enumerate() {
-            request
-                .send(Timestamp {
-                    physical: timestamp.physical,
-                    logical: timestamp.logical + offset as i64,
-                })
-                .unwrap();
-        }
-        client.write().unwrap().reactor.tso_buffer = Some(requests);
-    }
-
-    fn dispatch(client: &Arc<RwLock<LeaderClient>>, task: PdTask, handle: &TokioHandle) {
-        match task {
-            PdTask::Request => Self::tso_request(client),
-            PdTask::Response(requests, response) => Self::tso_response(client, requests, &response),
-            PdTask::Init => Self::init(client, handle),
-        }
-    }
-
-    fn get_ts(&mut self) -> impl Future<Output = Result<Timestamp>> {
-        let context = request_context("get_ts", ());
-        let (tx, rx) = oneshot::channel::<Timestamp>();
-        self.tso_batch.push(tx);
-        if self.tso_pending.is_none() {
-            // Schedule tso request to run.
-            self.schedule(PdTask::Request);
-        }
-        rx.map_err(Into::into)
-            .into_future()
-            .map(move |r| context.done(r))
-    }
-}
+//
+//type TsoChannel = oneshot::Sender<Timestamp>;
+//
+//enum PdTask {
+//    Init,
+//    Request,
+//    Response(Vec<oneshot::Sender<Timestamp>>, pdpb::TsoResponse),
+//}
+//
+//struct PdReactor {
+//    task_tx: Option<UnboundedSender<Option<PdTask>>>,
+//    tso_tx: Sender<pdpb::TsoRequest>,
+//    tso_rx: Option<Receiver<pdpb::TsoRequest>>,
+//
+//    handle: Option<JoinHandle<()>>,
+//    tso_pending: Option<Vec<TsoChannel>>,
+//    tso_buffer: Option<Vec<TsoChannel>>,
+//    tso_batch: Vec<TsoChannel>,
+//}
+//
+//impl Drop for PdReactor {
+//    fn drop(&mut self) {
+//        if let Some(handle) = self.handle.take() {
+//            handle.join().unwrap();
+//        }
+//    }
+//}
+//
+//impl PdReactor {
+//    fn new() -> Self {
+//        let (tso_tx, tso_rx) = channel(1);
+//        PdReactor {
+//            task_tx: None,
+//            tso_tx,
+//            tso_rx: Some(tso_rx),
+//            handle: None,
+//            tso_buffer: Some(Vec::with_capacity(8)),
+//            tso_batch: Vec::with_capacity(8),
+//            tso_pending: None,
+//        }
+//    }
+//
+//    fn start(&mut self, client: Arc<RwLock<LeaderClient>>) {
+//        if self.handle.is_none() {
+//            info!("starting pd reactor thread");
+//            let (task_tx, task_rx) = unbounded();
+//            task_tx.unbounded_send(Some(PdTask::Init)).unwrap();
+//            self.task_tx = Some(task_tx);
+//            self.handle = Some(
+//                thread::Builder::new()
+//                    .name("dispatcher thread".to_owned())
+//                    .spawn(move || Self::poll(&client, task_rx))
+//                    .unwrap(),
+//            )
+//        } else {
+//            warn!("tso sender and receiver are stale, refreshing...");
+//            let (tso_tx, tso_rx) = channel(1);
+//            self.tso_tx = tso_tx;
+//            self.tso_rx = Some(tso_rx);
+//            self.schedule(PdTask::Init);
+//        }
+//    }
+//
+//    fn schedule(&self, task: PdTask) {
+//        self.task_tx
+//            .as_ref()
+//            .unwrap()
+//            .unbounded_send(Some(task))
+//            .expect("unbounded send should never fail");
+//    }
+//
+//    fn poll(client: &Arc<RwLock<LeaderClient>>, rx: UnboundedReceiver<Option<PdTask>>) {
+//        let mut core = Core::new().unwrap();
+//        let handle = core.handle();
+//        {
+//            let f = rx.take_while(|t| future::ready(t.is_some())).for_each(|t| {
+//                Self::dispatch(&client, t.unwrap(), &handle);
+//                future::ready(())
+//            });
+//            core.run(TryFutureExt::compat(f.unit_error())).unwrap();
+//        }
+//    }
+//
+//    fn init(client: &Arc<RwLock<LeaderClient>>, handle: &TokioHandle) {
+//        let client = Arc::clone(client);
+//        let (tx, rx) = client.write().unwrap().client.tso().unwrap();
+//        let tx = Compat01As03Sink::new(tx);
+//        let rx = Compat01As03::new(rx);
+//        let tso_rx = client.write().unwrap().reactor.tso_rx.take().unwrap(); // Receiver<TsoRequest>: Stream
+//
+//        handle.spawn(
+//            tx.sink_map_err(Into::into)
+//                .send_all_compat(tso_rx.map(|r| (r, WriteFlags::default())))
+//                .map(|r: Result<_>| match r {
+//                    Ok((_sender, _)) => {
+//                        // FIXME(#54) the previous code doesn't work because we can't get mutable
+//                        // access to the underlying StreamingCallSink to call `cancel`. But I think
+//                        // that is OK because it will be canceled when it is dropped.
+//                        //
+//                        // _sender.get_mut().get_ref().cancel();
+//                        Ok(())
+//                    }
+//                    Err(e) => {
+//                        error!("failed to send tso requests: {:?}", e);
+//                        Err(())
+//                    }
+//                })
+//                .compat(),
+//        );
+//
+//        handle.spawn(
+//            rx.try_for_each(move |resp| {
+//                let mut client = client.write().unwrap();
+//                let reactor = &mut client.reactor;
+//                let tso_pending = reactor.tso_pending.take().unwrap();
+//                reactor.schedule(PdTask::Response(tso_pending, resp));
+//                if !reactor.tso_batch.is_empty() {
+//                    // Schedule another tso_batch of request
+//                    reactor.schedule(PdTask::Request);
+//                }
+//                future::ready(Ok(()))
+//            })
+//            .map_err(|e| panic!("unexpected error: {:?}", e))
+//            .compat(),
+//        );
+//    }
+//
+//    fn tso_request(client: &Arc<RwLock<LeaderClient>>) {
+//        let mut client = client.write().unwrap();
+//        let cluster_id = client.cluster_id;
+//        let reactor = &mut client.reactor;
+//        let mut tso_batch = reactor.tso_buffer.take().unwrap();
+//        tso_batch.extend(reactor.tso_batch.drain(..));
+//        let mut request = pd_request!(cluster_id, pdpb::TsoRequest);
+//        let batch_size = observe_tso_batch(tso_batch.len());
+//        request.set_count(batch_size);
+//        reactor.tso_pending = Some(tso_batch);
+//        reactor
+//            .tso_tx
+//            .try_send(request)
+//            .expect("channel can never be full");
+//    }
+//
+//    fn tso_response(
+//        client: &Arc<RwLock<LeaderClient>>,
+//        mut requests: Vec<TsoChannel>,
+//        response: &pdpb::TsoResponse,
+//    ) {
+//        let timestamp = response.get_timestamp();
+//        for (offset, request) in requests.drain(..).enumerate() {
+//            request
+//                .send(Timestamp {
+//                    physical: timestamp.physical,
+//                    logical: timestamp.logical + offset as i64,
+//                })
+//                .unwrap();
+//        }
+//        client.write().unwrap().reactor.tso_buffer = Some(requests);
+//    }
+//
+//    fn dispatch(client: &Arc<RwLock<LeaderClient>>, task: PdTask, handle: &TokioHandle) {
+//        match task {
+//            PdTask::Request => Self::tso_request(client),
+//            PdTask::Response(requests, response) => Self::tso_response(client, requests, &response),
+//            PdTask::Init => Self::init(client, handle),
+//        }
+//    }
+//
+//    fn get_ts(&mut self) -> impl Future<Output = Result<Timestamp>> {
+//        let context = request_context("get_ts", ());
+//        let (tx, rx) = oneshot::channel::<Timestamp>();
+//        self.tso_batch.push(tx);
+//        if self.tso_pending.is_none() {
+//            // Schedule tso request to run.
+//            self.schedule(PdTask::Request);
+//        }
+//        rx.map_err(Into::into)
+//            .into_future()
+//            .map(move |r| context.done(r))
+//    }
+//}
 
 pub struct LeaderClient {
     pub client: pdpb::PdClient,
@@ -229,7 +230,6 @@ pub struct LeaderClient {
     cluster_id: u64,
     security_mgr: Arc<SecurityManager>,
     last_update: Instant,
-    reactor: PdReactor,
     timeout: Duration,
 }
 
@@ -252,17 +252,25 @@ impl LeaderClient {
             members,
             security_mgr,
             last_update: Instant::now(),
-            reactor: PdReactor::new(),
             cluster_id,
             timeout,
         }));
 
-        client.write().unwrap().reactor.start(Arc::clone(&client));
         Ok(client)
     }
 
-    pub fn get_ts(&mut self) -> impl Future<Output = Result<Timestamp>> {
-        self.reactor.get_ts()
+    pub async fn get_ts(&mut self) -> Result<Timestamp> {
+        let (tx, rx) = self.client.tso()?;
+        let (mut tx, mut rx) = (tx.sink_compat(), rx.compat());
+        let mut req = pd_request!(self.cluster_id, pdpb::TsoRequest);
+        req.count = 8;
+        let write_flags = WriteFlags::default().buffer_hint(false);
+        tx.send((req, write_flags)).await?;
+        let resp = rx.next().await.unwrap();
+        Ok(Timestamp {
+            physical: 0,
+            logical: 0,
+        })
     }
 
     // Re-establish connection with PD leader in synchronized fashion.
@@ -289,7 +297,6 @@ impl LeaderClient {
             leader.client = client;
             leader.members = members;
             leader.last_update = Instant::now();
-            leader.reactor.start(leader_clone);
         }
         warn!("updating PD client done, spent {:?}", start.elapsed());
         Ok(())

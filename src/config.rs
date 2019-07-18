@@ -14,13 +14,13 @@ use std::{path::PathBuf, time::Duration};
 ///
 /// By default, this client will use an insecure connection over instead of one protected by
 /// Transport Layer Security (TLS). Your deployment may have chosen to rely on security measures
-/// such as a private network, or a VPN layer to provid secure transmission.
+/// such as a private network, or a VPN layer to provide secure transmission.
 ///
 /// To use a TLS secured connection, use the `with_security` function to set the required
 /// parameters.
 ///
 /// TiKV does not currently offer encrypted storage (or encryption-at-rest).
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
@@ -29,9 +29,27 @@ pub struct Config {
     pub(crate) cert_path: Option<PathBuf>,
     pub(crate) key_path: Option<PathBuf>,
     pub(crate) timeout: Duration,
+    pub(crate) pd_concurrency: usize,
+    pub(crate) tikv_concurrency: usize,
 }
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+const DEFAULT_PD_CONCURRENCY: usize = 1;
+const DEFAULT_TIKV_CONCURRENCY: usize = 4;
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            pd_endpoints: Vec::new(),
+            ca_path: None,
+            cert_path: None,
+            key_path: None,
+            timeout: DEFAULT_REQUEST_TIMEOUT,
+            pd_concurrency: DEFAULT_PD_CONCURRENCY,
+            tikv_concurrency: DEFAULT_TIKV_CONCURRENCY,
+        }
+    }
+}
 
 impl Config {
     /// Create a new [`Config`](Config) which coordinates with the given PD endpoints.
@@ -46,10 +64,7 @@ impl Config {
     pub fn new(pd_endpoints: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Config {
             pd_endpoints: pd_endpoints.into_iter().map(Into::into).collect(),
-            ca_path: None,
-            cert_path: None,
-            key_path: None,
-            timeout: DEFAULT_REQUEST_TIMEOUT,
+            ..Default::default()
         }
     }
 
@@ -78,6 +93,16 @@ impl Config {
 
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    pub fn pd_concurrency(mut self, concurrency: usize) -> Self {
+        self.pd_concurrency = concurrency;
+        self
+    }
+
+    pub fn tikv_concurrency(mut self, concurrency: usize) -> Self {
+        self.tikv_concurrency = concurrency;
         self
     }
 }

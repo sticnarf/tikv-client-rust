@@ -3,6 +3,7 @@
 // Long and nested future chains can quickly result in large generic types.
 #![type_length_limit = "16777216"]
 #![allow(clippy::redundant_closure)]
+#![feature(async_await)]
 
 //! This crate provides a clean, ready to use client for [TiKV](https://github.com/tikv/tikv), a
 //! distributed transactional Key-Value database written in Rust.
@@ -78,6 +79,7 @@ mod compat;
 mod config;
 mod errors;
 mod kv;
+pub mod pd;
 #[cfg(test)]
 mod proptests;
 pub mod raw;

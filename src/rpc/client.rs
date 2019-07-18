@@ -58,20 +58,24 @@ impl RpcClient {
             },
         );
 
-        let pd = Arc::new(PdClient::connect(
-            Arc::clone(&env),
-            &config.pd_endpoints,
-            Arc::clone(&security_mgr),
-            config.timeout,
-        )?);
-        let tikv = Default::default();
-        Ok(RpcClient {
-            pd,
-            tikv,
-            env,
-            security_mgr,
-            timeout: config.timeout,
-        })
+        //        let pd = Arc::new(
+        //            PdClient::connect(
+        //                Arc::clone(&env),
+        //                &config.pd_endpoints,
+        //                Arc::clone(&security_mgr),
+        //                config.timeout,
+        //            )
+        //            .wait()?,
+        //        );
+        //        let tikv = Default::default();
+        //        Ok(RpcClient {
+        //            pd,
+        //            tikv,
+        //            env,
+        //            security_mgr,
+        //            timeout: config.timeout,
+        //        })
+        Err(Error::unimplemented())
     }
 
     pub fn raw_get(
@@ -288,16 +292,19 @@ impl RpcClient {
     }
 
     fn load_store(&self, id: StoreId) -> impl Future<Output = Result<Store>> {
-        info!("reload info for store {}", id);
-        self.pd.get_store(id).map_ok(Into::into)
+        //        info!("reload info for store {}", id);
+        //        self.pd.get_store(id).map_ok(Into::into)
+        future::err(Error::unimplemented())
     }
 
     fn load_region_by_id(&self, id: RegionId) -> impl Future<Output = Result<Region>> {
-        self.pd.get_region_by_id(id)
+        //        self.pd.get_region_by_id(id)
+        future::err(Error::unimplemented())
     }
 
     fn get_region(&self, key: &Key) -> impl Future<Output = Result<Region>> {
-        self.pd.get_region(key.into())
+        future::err(Error::unimplemented())
+        //        self.pd.get_region(key.into())
     }
 
     fn kv_client(&self, context: &RegionContext) -> Result<Arc<KvClient>> {

@@ -4,8 +4,8 @@
 mod util;
 mod client;
 mod context;
-mod pd;
-mod security;
+pub(crate) mod pd;
+pub(crate) mod security;
 mod tikv;
 
 pub(crate) use self::client::RpcClient;
