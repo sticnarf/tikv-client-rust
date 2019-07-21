@@ -1,23 +1,25 @@
 use self::tso::Tso;
 use crate::{rpc::security::SecurityManager, Config, Error, Result};
-use futures::{compat::*, prelude::*, future::BoxFuture};
+use futures::{compat::*, future::BoxFuture, prelude::*};
 use grpcio::{CallOption, EnvBuilder, Environment};
 use kvproto::pdpb::{PdClient as RpcClient, *};
+use parking_lot::{lock_api::RwLock, RawRwLock};
 use std::{sync::Arc, time::Duration};
 
 mod tso;
 
 pub trait PdClient {
     fn connect(config: &Config) -> BoxFuture<Result<Self>>
-    where Self: Sized;
+    where
+        Self: Sized;
 
-    fn get_ts(&mut self) -> BoxFuture<Result<Timestamp>>;
+    fn get_ts(&self) -> BoxFuture<Result<Timestamp>>;
 }
 
 pub struct Pd {
     cluster_id: u64,
     rpc_client: RpcClient,
-    tso: Tso,
+    tso: RwLock<RawRwLock, Tso>,
     config: PdConfig,
     members: GetMembersResponse,
 }
@@ -27,7 +29,7 @@ impl PdClient for Pd {
         Pd::connect_impl(config).boxed()
     }
 
-    fn get_ts(&mut self) -> BoxFuture<Result<Timestamp>> {
+    fn get_ts(&self) -> BoxFuture<Result<Timestamp>> {
         self.get_ts_impl().boxed()
     }
 }
@@ -61,7 +63,7 @@ impl Pd {
             .as_ref()
             .ok_or_else(|| Error::internal_error("ResponseHeader is missing"))?
             .cluster_id;
-        let tso = Tso::new(cluster_id, &rpc_client)?;
+        let tso = RwLock::new(Tso::new(cluster_id, &rpc_client).await?);
 
         Ok(Pd {
             cluster_id,
@@ -72,8 +74,8 @@ impl Pd {
         })
     }
 
-    pub async fn get_ts_impl(&mut self) -> Result<Timestamp> {
-        self.tso.get_ts().await
+    pub async fn get_ts_impl(&self) -> Result<Timestamp> {
+        self.tso.write().get_ts().await
     }
 }
 
