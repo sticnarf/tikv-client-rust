@@ -19,7 +19,7 @@ pub trait PdClient {
 pub struct Pd {
     cluster_id: u64,
     rpc_client: RpcClient,
-    tso: RwLock<RawRwLock, Tso>,
+    tso: Tso,
     config: PdConfig,
     members: GetMembersResponse,
 }
@@ -63,7 +63,7 @@ impl Pd {
             .as_ref()
             .ok_or_else(|| Error::internal_error("ResponseHeader is missing"))?
             .cluster_id;
-        let tso = RwLock::new(Tso::new(cluster_id, &rpc_client).await?);
+        let tso = Tso::new(cluster_id, &rpc_client).await?;
 
         Ok(Pd {
             cluster_id,
@@ -75,7 +75,7 @@ impl Pd {
     }
 
     pub async fn get_ts_impl(&self) -> Result<Timestamp> {
-        self.tso.write().get_ts().await
+        self.tso.get_ts().await
     }
 }
 
