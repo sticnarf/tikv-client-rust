@@ -90,6 +90,9 @@ pub enum ErrorKind {
         entry_size: u64,
         message: String,
     },
+    /// The response received from PD or TiKV is malformed
+    #[fail(display = "{}", message)]
+    BadResponse { message: String },
     #[fail(display = "{}", message)]
     InternalError { message: String },
 }
@@ -195,6 +198,12 @@ impl Error {
             region_id: e.get_region_id(),
             entry_size: e.get_entry_size(),
             message,
+        })
+    }
+
+    pub(crate) fn bad_response(message: impl Into<String>) -> Self {
+        Error::from(ErrorKind::BadResponse {
+            message: message.into(),
         })
     }
 

@@ -22,7 +22,7 @@ use futures::{
     poll,
     prelude::*,
     select,
-    stream::FuturesUnordered,
+    stream::FusedStream,
     task::{Context, LocalSpawnExt, Poll, Waker},
 };
 use futures_timer::Interval;
@@ -36,7 +36,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const MAX_TSO_PENDING_COUNT: usize = 128;
+const MAX_TSO_PENDING_COUNT: usize = 64;
 
 #[derive(Clone)]
 pub struct Tso {
@@ -83,6 +83,33 @@ struct TsWorker {
 
 impl TsWorker {
     fn run(self) {
+        fn allocate_ts(
+            resp: Option<grpcio::Result<TsoResponse>>,
+            pending: &mut VecDeque<oneshot::Sender<Timestamp>>,
+        ) -> Result<()> {
+            let resp =
+                resp.ok_or_else(|| Error::internal_error("TsoResponse receiver ended"))??;
+            let tail_ts = resp
+                .timestamp
+                .ok_or_else(|| Error::bad_response("No timestamp in TsoResponse"))?;
+            let mut offset = resp.count as i64;
+            while offset > 0 {
+                offset -= 1;
+                if let Some(sender) = pending.pop_front() {
+                    let ts = Timestamp {
+                        physical: tail_ts.physical,
+                        logical: tail_ts.logical - offset,
+                    };
+
+                    // It doesn't matter if the other end of the channel is dropped.
+                    let _ = sender.send(ts);
+                } else {
+                    break;
+                }
+            }
+            Ok(())
+        }
+
         thread::spawn(move || {
             let mut executor = LocalPool::new();
             let mut spawner = executor.spawner();
@@ -95,66 +122,54 @@ impl TsWorker {
                 .expect("spawn error");
 
             let mut rpc_receiver = self.rpc_receiver.fuse();
-            let mut result_sender_rx = self.result_sender_rx.fuse();
+            let mut result_sender_rx = self.result_sender_rx;
             spawner
-                .spawn_local(async move {
-                    let mut pending = VecDeque::with_capacity(MAX_TSO_PENDING_COUNT);
-                    let mut last_count = 0;
+                .spawn_local(
+                    async move {
+                        let mut pending = VecDeque::with_capacity(MAX_TSO_PENDING_COUNT);
+                        let mut last_count = 0;
 
-                    fn allocate_ts(resp: &TsoResponse, pending: &mut VecDeque<oneshot::Sender<Timestamp>>) {
-                        let tail_ts = resp.timestamp.as_ref().expect("No timestamp received");
-                        let mut offset = resp.count as i64;
-                        while offset > 0 {
-                            offset -= 1;
-                            if let Some(sender) = pending.pop_front() {
-                                let ts = Timestamp {
-                                    physical: tail_ts.physical,
-                                    logical: tail_ts.logical - offset,
-                                };
-                                // FIXME: don't panic
-                                sender.send(ts).expect("broken channel");
+                        loop {
+                            if pending.len() == MAX_TSO_PENDING_COUNT
+                                || result_sender_rx.is_terminated()
+                            {
+                                let resp = rpc_receiver.next().await;
+                                allocate_ts(resp, &mut pending)?;
+                                last_count = pending.len();
                             } else {
-                                break;
-                            }
-                        }
-                    }
-
-                    loop {
-                        if pending.len() == MAX_TSO_PENDING_COUNT {
-                            let resp = rpc_receiver.next().await.unwrap().unwrap();
-                            allocate_ts(&resp, &mut pending);
-                            last_count = pending.len();
-                        } else {
-                            select! {
-                                resp = rpc_receiver.next() => {
-                                    let resp = resp.unwrap().unwrap();
-                                    allocate_ts(&resp, &mut pending);
-                                    last_count = pending.len();
-                                },
-                                result_sender = result_sender_rx.next() => {
-                                    // FIXME: don't panic
-                                    let result_sender = result_sender.unwrap();
-                                    pending.push_back(result_sender);
+                                select! {
+                                    resp = rpc_receiver.next() => {
+                                        allocate_ts(resp, &mut pending)?;
+                                        last_count = pending.len();
+                                    },
+                                    result_sender = result_sender_rx.next() => {
+                                        if let Some(result_sender) = result_sender {
+                                            pending.push_back(result_sender);
+                                        }
+                                    }
                                 }
                             }
-                        }
 
-                        while pending.len() < MAX_TSO_PENDING_COUNT {
-                            if let Poll::Ready(Some(sender)) = poll!(result_sender_rx.next()) {
-                                pending.push_back(sender);
-                            } else {
-                                break;
+                            while pending.len() < MAX_TSO_PENDING_COUNT
+                                && !result_sender_rx.is_terminated()
+                            {
+                                if let Poll::Ready(Some(sender)) = poll!(result_sender_rx.next()) {
+                                    pending.push_back(sender);
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            let count = pending.len() - last_count;
+                            if count > 0 {
+                                println!("count = {}", count);
+                                req_stream.push(count as u32);
+                                last_count = pending.len();
                             }
                         }
-
-                        let count = pending.len() - last_count;
-                        if count > 0 {
-                            println!("count = {}", count);
-                            req_stream.push(count as u32);
-                            last_count = pending.len();
-                        }
                     }
-                })
+                        .map(|_: Result<()>| ()),
+                )
                 .expect("spawn error");
 
             executor.run();
@@ -164,7 +179,7 @@ impl TsWorker {
 
 #[derive(Clone)]
 struct RequestStream {
-    inner: Rc<RefCell<RequestStreamInner>>
+    inner: Rc<RefCell<RequestStreamInner>>,
 }
 
 impl RequestStream {
@@ -172,10 +187,10 @@ impl RequestStream {
         let inner = RequestStreamInner {
             cluster_id,
             count_queue: VecDeque::with_capacity(capacity),
-            waker: None
+            waker: None,
         };
         RequestStream {
-            inner: Rc::new(RefCell::new(inner))
+            inner: Rc::new(RefCell::new(inner)),
         }
     }
 
@@ -217,7 +232,7 @@ impl Stream for RequestStream {
 struct RequestStreamInner {
     cluster_id: u64,
     count_queue: VecDeque<u32>,
-    waker: Option<Waker>
+    waker: Option<Waker>,
 }
 
 #[cfg(test)]

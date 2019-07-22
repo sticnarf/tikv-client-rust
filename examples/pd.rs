@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
     //    sleep(Duration::from_secs(1));
 
     let total = AtomicU64::new(0);
-    let futures = (0..1000000i32).map(|_| {
+    let futures = (0..1000i32).map(|_| {
         async {
             let inst = future::lazy(|_| Instant::now()).await;
             let ts = pd.get_ts().await.ok();
@@ -33,14 +33,14 @@ async fn main() -> Result<()> {
     println!("{:?}", beg.elapsed());
     println!("{:?}", total);
 
-//            let inst = Instant::now();
-//            let ts = pd.get_ts().await?;
-//            println!("{:?}", inst.elapsed());
-//            println!("{:#?}", ts);
-//            let inst = Instant::now();
-//            let ts = pd.get_ts().await?;
-//            println!("{:?}", inst.elapsed());
-//            println!("{:#?}", ts);
+    //            let inst = Instant::now();
+    //            let ts = pd.get_ts().await?;
+    //            println!("{:?}", inst.elapsed());
+    //            println!("{:#?}", ts);
+    //            let inst = Instant::now();
+    //            let ts = pd.get_ts().await?;
+    //            println!("{:?}", inst.elapsed());
+    //            println!("{:#?}", ts);
     // Cleanly exit.
     Ok(())
 }
