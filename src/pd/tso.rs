@@ -65,11 +65,10 @@ impl Tso {
     pub async fn get_ts(&self) -> Result<Timestamp> {
         let (result_sender, result_receiver) = oneshot::channel();
         let mut result_sender_tx = self.result_sender_tx.clone();
-        // FIXME: don't panic
         result_sender_tx
             .send(result_sender)
             .await
-            .expect("send error");
+            .map_err(|_| Error::internal_error("Result sender channel closed"))?;
         Ok(result_receiver.await?)
     }
 }
@@ -162,7 +161,7 @@ impl TsWorker {
 
                             let count = pending.len() - last_count;
                             if count > 0 {
-                                println!("count = {}", count);
+                                debug!("TsoRequest count = {}", count);
                                 req_stream.push(count as u32);
                                 last_count = pending.len();
                             }
@@ -173,6 +172,7 @@ impl TsWorker {
                 .expect("spawn error");
 
             executor.run();
+            println!("executor finished");
         });
     }
 }
@@ -238,12 +238,13 @@ struct RequestStreamInner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kvproto::metapb;
 
     #[test]
     fn print_size() {
-        println!("{}", std::mem::size_of::<TsBuffer>());
-        println!("{}", std::mem::size_of::<Option<Result<Timestamp>>>());
-        println!("{}", std::mem::size_of::<ClientDuplexSender<TsoRequest>>());
+        println!("{}", std::mem::size_of::<Timestamp>());
+        println!("{}", std::mem::size_of::<crate::rpc::pd::Region>());
+        println!("{}", std::mem::size_of::<kvproto::tikvpb::TikvClient>());
         println!(
             "{}",
             std::mem::size_of::<futures::channel::oneshot::Sender<Result<Timestamp>>>()
